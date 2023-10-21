@@ -5,7 +5,8 @@ import nltk
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 import tokenizations
 import torch
-
+import sys
+import random
 from benepar import ptb_unescape
 from benepar.parse_base import BaseInputExample
 import transliterate
@@ -41,6 +42,7 @@ class ParsingExample(BaseInputExample):
 class Treebank(torch.utils.data.Dataset):
     def __init__(self, examples):
         self.examples = examples
+        # self.all_trees = [x.tree for x in examples]
 
     def __len__(self):
         return len(self.examples)
@@ -65,6 +67,37 @@ class Treebank(torch.utils.data.Dataset):
 
     def without_gold_annotations(self):
         return Treebank([x.without_gold_annotations() for x in self.examples])
+
+def augment_trees(treebank, n, pos2wrd):
+    new_trees = []
+    no_change = [',', '.', ':','?','!', '、', '。', '？', '！', '；', '（', '）', '「', '」', '『', '』', '〈', '〉', '《', '》']
+    while len(new_trees)<n:
+        new_tree = random.choice(treebank.trees).copy(deep = True)
+        rand_leaf_idx = random.choice(range(len(new_tree.leaves())))
+        random_leaf_position = new_tree.leaf_treeposition(rand_leaf_idx)
+        random_pos_position = new_tree.leaf_treeposition(rand_leaf_idx)[:-1]
+        new_tree_pos = new_tree[random_pos_position].label()
+        new_wrd = random.choice(pos2wrd[new_tree_pos])
+        # print(new_wrd, new_tree[random_leaf_position])
+
+        if new_wrd != new_tree[random_leaf_position] and new_wrd not in no_change:
+            new_tree[random_leaf_position] = new_wrd
+            new_trees.append(new_tree)
+        else:
+            continue
+    sents = []
+    for tree in new_trees:
+        words = tree.leaves()
+        sp_after = [False for _ in words]
+        sents.append((words, sp_after))
+    augmented_treebank = Treebank(
+        treebank.examples +
+        [
+            ParsingExample(tree=tree, words=words, space_after=space_after)
+            for tree, (words, space_after) in zip(new_trees, sents)
+        ]
+    )
+    return augmented_treebank 
 
 
 def read_text(text_path):
@@ -121,7 +154,7 @@ def read_text(text_path):
                 sent.append((w, sp))
     return sents
 
-
+    
 def load_trees(const_path, text_path=None, text_processing="default"):
     """Load a treebank.
 
